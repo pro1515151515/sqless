@@ -67,9 +67,14 @@ r = requests.delete(
 )
 ```
 
-`DB_TABLE = "users"` will read/write records in `users` table in `db/default.sqlite`.
-`DB_TABLE = "mall-users"` will read/write records in `users` table in `db/mall.sqlite`.
-`DB_TABLE = "east-mall-users"` will read/write records in `users` table in `db/east/mall.sqlite`.
+- `{BASE_URL}/db/users` will read/write records in `users` table in `db/default.sqlite`.
+
+
+- `{BASE_URL}/db/mall-users` will read/write records in `users` table in `db/mall.sqlite`.
+
+
+- `{BASE_URL}/db/east-mall-users` will read/write records in `users` table in `db/east/mall.sqlite`.
+
 
 ### Using the FileStorage API
 ```python

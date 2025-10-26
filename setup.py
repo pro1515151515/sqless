@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="sqless",
-    version="0.1.0",
+    version="0.1.1",
     author="pro1515151515",
     author_email="pro1515151515@qq.com",
     description="An async HTTP server for SQLite, FileStorage and WebPage.",
@@ -13,6 +13,13 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/pro1515151515/sqless",
     packages=find_packages(),
+    include_package_data=True,
+    package_data={
+        "sqless": [
+            "openapi.yaml",
+            "docs.html"
+        ],
+    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",

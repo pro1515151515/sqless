@@ -1,0 +1,2 @@
+recursive-include src/sqless *.yaml *.html
+include README.md
