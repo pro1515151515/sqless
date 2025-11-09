@@ -5,11 +5,11 @@ import asyncio
 from aiohttp import web, ClientSession, FormData, ClientTimeout
 import orjson
 import aiofiles
-from .database import DB
+from database import DB
 import re
 path_src = os.path.dirname(os.path.abspath(__file__))
 # ---------- Configuration (use env vars in production) ----------
-DEFAULT_SECRET = os.environ.get("SQLESS_SECRET", None)
+DEFAULT_SECRET = os.environ.get("SQLESS_SECRET", None) or 'abcde'
 
 num2time = lambda t=None, f="%Y%m%d-%H%M%S": time.strftime(f, time.localtime(int(t if t else time.time())))
 tspToday = lambda: int(time.time() // 86400 * 86400 - 8 * 3600)  # UTC+8 today midnight
@@ -55,6 +55,7 @@ async def run_server(
             if not suc:
                 return False, path_db
             db = DB(path_db)
+            #await db.connect()
             dbs[db_key] = db
         return dbs[db_key]
 
@@ -235,18 +236,18 @@ async def run_server(
     await site.start()
     print(f"Serving on http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}")
     print(f"Serving at {path_this}")
-    if not os.path.exists(f"{path_this}/www"):
-        os.makedirs(f"{path_this}/www")
-    if not os.path.exists(f"{path_this}/www/openapi.yaml"):
-        with open(f"{path_src}/openapi.yaml",'r',encoding='utf-8') as f:
-            txt = f.read()
-        with open(f"{path_this}/www/openapi.yaml",'w',encoding='utf-8') as f:
-            f.write(txt.replace('127.0.0.1:12239',f"{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"))
-    if not os.path.exists(f"{path_this}/www/index.html"):
-        with open(f"{path_src}/docs.html",'r',encoding='utf-8') as f:
-            txt = f.read()
-        with open(f"{path_this}/www/index.html",'w',encoding='utf-8') as f:
-            f.write(txt)
+    #if not os.path.exists(f"{path_this}/www"):
+    #    os.makedirs(f"{path_this}/www")
+    #if not os.path.exists(f"{path_this}/www/openapi.yaml"):
+    #    with open(f"{path_src}/openapi.yaml",'r',encoding='utf-8') as f:
+    #        txt = f.read()
+    #    with open(f"{path_this}/www/openapi.yaml",'w',encoding='utf-8') as f:
+    #        f.write(txt.replace('127.0.0.1:12239',f"{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"))
+    #if not os.path.exists(f"{path_this}/www/index.html"):
+    #    with open(f"{path_src}/docs.html",'r',encoding='utf-8') as f:
+    #        txt = f.read()
+    #    with open(f"{path_this}/www/index.html",'w',encoding='utf-8') as f:
+    #        f.write(txt)
     stop_event = asyncio.Event()
     try:
         # simplified loop, exit on Cancelled/Error

@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="sqless",
-    version="0.1.2",
+    version="0.1.3",
     author="pro1515151515",
     author_email="pro1515151515@qq.com",
     description="An async HTTP server for SQLite, FileStorage and WebPage.",
@@ -29,7 +29,6 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=[
-        "aiosqlite>=0.17.0",
         "aiohttp>=3.8.0",
         "orjson>=3.6.0",
         "aiofiles>=0.8.0",

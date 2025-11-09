@@ -5,11 +5,11 @@ import asyncio
 from aiohttp import web, ClientSession, FormData, ClientTimeout
 import orjson
 import aiofiles
-from .database import DB
+from database import DB
 import re
 path_src = os.path.dirname(os.path.abspath(__file__))
 # ---------- Configuration (use env vars in production) ----------
-DEFAULT_SECRET = os.environ.get("SQLESS_SECRET", None)
+DEFAULT_SECRET = os.environ.get("SQLESS_SECRET", None) or 'abcde'
 
 num2time = lambda t=None, f="%Y%m%d-%H%M%S": time.strftime(f, time.localtime(int(t if t else time.time())))
 tspToday = lambda: int(time.time() // 86400 * 86400 - 8 * 3600)  # UTC+8 today midnight
@@ -55,6 +55,7 @@ async def run_server(
             if not suc:
                 return False, path_db
             db = DB(path_db)
+            await db.connect()
             dbs[db_key] = db
         return dbs[db_key]
 
@@ -95,7 +96,7 @@ async def run_server(
         print(f"[{num2time()}]{request['client_ip']}|POST {db_key}|{table}|{data}")
         if not isinstance(data, dict):
             return web.Response(body=orjson.dumps({'suc': False, 'data': 'invalid data type'}), content_type='application/json')
-        ret = db.upsert(table, data, 'key')
+        ret = await db.upsert(table, data, 'key')
         return web.Response(body=orjson.dumps(ret), content_type='application/json')
 
     async def handle_delete_db(request):
@@ -109,7 +110,7 @@ async def run_server(
         db = await get_db(db_key)
         where = request.match_info['where']
         print(f"[{num2time()}]{request['client_ip']}|DELETE {db_key}|{table}|{where}")
-        ret = db.delete(table, where)
+        ret = await db.delete(table, where)
         return web.Response(body=orjson.dumps(ret), content_type='application/json')
 
     async def handle_get_db(request):
@@ -126,9 +127,9 @@ async def run_server(
         limit = min(max(int(request.query.get('per_page', 20)), 0), 100)
         offset = (page - 1) * limit
         print(f"[{num2time()}]{request['client_ip']}|GET {db_key}|{table}|{where}?page={page}&per_page={limit}")
-        ret = db.query(table, where, limit, offset)
+        ret = await db.query(table, where, limit, offset)
         if isinstance(ret, dict) and ret.get('suc') and limit > 1 and not offset:
-            cnt = db.count(table, where)
+            cnt = await db.count(table, where)
             ret['count'] = cnt
             ret['max_page'], rest = divmod(ret['count'], limit)
             if rest:
@@ -235,18 +236,18 @@ async def run_server(
     await site.start()
     print(f"Serving on http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}")
     print(f"Serving at {path_this}")
-    if not os.path.exists(f"{path_this}/www"):
-        os.makedirs(f"{path_this}/www")
-    if not os.path.exists(f"{path_this}/www/openapi.yaml"):
-        with open(f"{path_src}/openapi.yaml",'r',encoding='utf-8') as f:
-            txt = f.read()
-        with open(f"{path_this}/www/openapi.yaml",'w',encoding='utf-8') as f:
-            f.write(txt.replace('127.0.0.1:12239',f"{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"))
-    if not os.path.exists(f"{path_this}/www/index.html"):
-        with open(f"{path_src}/docs.html",'r',encoding='utf-8') as f:
-            txt = f.read()
-        with open(f"{path_this}/www/index.html",'w',encoding='utf-8') as f:
-            f.write(txt)
+    #if not os.path.exists(f"{path_this}/www"):
+    #    os.makedirs(f"{path_this}/www")
+    #if not os.path.exists(f"{path_this}/www/openapi.yaml"):
+    #    with open(f"{path_src}/openapi.yaml",'r',encoding='utf-8') as f:
+    #        txt = f.read()
+    #    with open(f"{path_this}/www/openapi.yaml",'w',encoding='utf-8') as f:
+    #        f.write(txt.replace('127.0.0.1:12239',f"{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"))
+    #if not os.path.exists(f"{path_this}/www/index.html"):
+    #    with open(f"{path_src}/docs.html",'r',encoding='utf-8') as f:
+    #        txt = f.read()
+    #    with open(f"{path_this}/www/index.html",'w',encoding='utf-8') as f:
+    #        f.write(txt)
     stop_event = asyncio.Event()
     try:
         # simplified loop, exit on Cancelled/Error
