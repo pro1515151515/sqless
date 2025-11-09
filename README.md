@@ -9,6 +9,7 @@ It is also an ORM for lazy people, similar to [dataset](https://github.com/pudo/
 - **High performance**. Faster than many ORMs, see [performance test](#performance-test).
 - **Minimal setup**. Just `pip install sqless` to run the server.
 - **Multi-file sharding**. Easily store data across multiple SQLite files.
+- **SQL-safe**. Uses semantic parsing, parameter binding, and identifier validation..
 
 
 
