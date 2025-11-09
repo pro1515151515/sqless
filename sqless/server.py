@@ -235,7 +235,7 @@ async def run_server(
     site = web.TCPSite(runner, host, port)
     await site.start()
     print(f"Serving on http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}")
-    print(f"Serving at {path_this.replace('\\','/')}")
+    print(f"Serving at {path_this}")
     if not os.path.exists(f"{path_this}/www"):
         os.makedirs(f"{path_this}/www")
     if not os.path.exists(f"{path_this}/www/openapi.yaml"):
