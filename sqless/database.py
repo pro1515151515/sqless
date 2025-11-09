@@ -225,6 +225,7 @@ class DB:
             # Enable WAL (Write-Ahead Logging)
             self.cursor.execute("PRAGMA journal_mode = WAL;")
             self.conn.commit()
+        self.tables = {}
 
     def close(self):
         if self.conn:
@@ -235,14 +236,14 @@ class DB:
         return list(self.inspect().keys())
     def __getitem__(self,table_name):
         if not valid_identifier(table_name):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {table_name}")
+            print(f"DB_ERROR| Illegal identifier: {table_name}")
             return None
         if table_name not in self.tables:
             self.tables[table_name] = Table(self,table_name,'key')
         return self.tables[table_name]
     def __delitem__(self,table_name):
         if not valid_identifier(table_name):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {table_name}")
+            print(f"DB_ERROR| Illegal identifier: {table_name}")
             return False
         sql = f"DROP TABLE IF EXISTS {table_name};"
         try:
@@ -251,11 +252,11 @@ class DB:
             if table_name in self.tables:
                 del self.tables[table_name]
         except Exception as e:
-            print(f"{num2time()}|DB_ERROR|{e}({sql})")
+            print(f"DB_ERROR|{e}({sql})")
             return False
     def __contains__(self,table_name):
         if not valid_identifier(table_name):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {table_name}")
+            print(f"DB_ERROR| Illegal identifier: {table_name}")
             return False
         sql = f"SELECT count(*) FROM sqlite_master WHERE type = 'table' and name = ?"
         values = (table_name,)
@@ -263,7 +264,7 @@ class DB:
             self.cursor.execute(sql,values)
             return bool(self.cursor.fetchone()[0])
         except Exception as e:
-            print(f"{num2time()}|DB_ERROR|{e}({sql}){values}")
+            print(f"DB_ERROR|{e}({sql}){values}")
             return False
     
     def ensure_table_and_fields(self, table: str, data: dict, pkey='key'):
@@ -308,7 +309,7 @@ class DB:
     
     def set_index(self,table:str,field:str):
         if not valid_identifier(table):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {field}")
+            print(f"DB_ERROR| Illegal identifier: {field}")
             return False
         sql = f'CREATE INDEX idx_{table}_{field} ON {table}({field})';
         try:
@@ -316,7 +317,7 @@ class DB:
             self.conn.commit()
             return True
         except Exception as e:
-            print(f"{num2time()}|DB_ERROR|{e}({sql})")
+            print(f"DB_ERROR|{e}({sql})")
             return False
     
     def upsert(self,table:str,data:dict,pkey='key'):
@@ -353,7 +354,7 @@ class DB:
                 self.conn.commit()
                 return {'suc': True}
             except Exception as e:
-                print(f"{num2time()}|DB_ERROR|{e}({sql}){values}")
+                print(f"DB_ERROR|{e}({sql}){values}")
                 return {'suc': False, 'msg': str(e), 'debug': sql}
     
     def upsert_mat(self,table:str,headers:list,mat:list,pkey='key'):
@@ -388,11 +389,11 @@ class DB:
                 self.conn.commit()
                 return {'suc': True}
             except Exception as e:
-                print(f"{num2time()}|DB_ERROR|{e}({sql}){values}")
+                print(f"DB_ERROR|{e}({sql}){values_mat}")
                 return {'suc': False, 'msg': str(e), 'debug': sql}
     def get_item(self,table,key,pkey='key'):
         if not valid_identifier(table):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {table}")
+            print(f"DB_ERROR| Illegal identifier: {table}")
             return None
         try:
             self.cursor.execute(f"SELECT * FROM {table} WHERE {pkey} = ?;",(key,))
@@ -403,11 +404,11 @@ class DB:
             return {}
     def find(self,table,where='',select='*'):
         if not valid_identifier(table):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {table}")
+            print(f"DB_ERROR| Illegal identifier: {table}")
             return None
         suc, sql_where, values = parse_where(where)
         if not suc:
-            print(f"{num2time()}|DB_ERROR| Illegal where: {sql_where}")
+            print(f"DB_ERROR| Illegal where: {sql_where}")
             return None
         cursor = self.conn.cursor()
         cursor.execute(f"SELECT {select} FROM {table} {sql_where};",values)
@@ -418,11 +419,11 @@ class DB:
             row = cursor.fetchone()
     def query(self,table,where='',limit=0,offset=0):
         if not valid_identifier(table):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {table}")
+            print(f"DB_ERROR| Illegal identifier: {table}")
             return {'suc':False, 'msg': f"Invalid table name"}
         suc, sql_where, values = parse_where(where)
         if not suc:
-            print(f"{num2time()}|DB_ERROR| Illegal where: {sql_where}")
+            print(f"DB_ERROR| Illegal where: {sql_where}")
             return {'suc':False, 'msg': f"Invalid where: {sql_where}"}
         if limit > 0:
             sql_where += f" LIMIT {limit}"
@@ -450,33 +451,14 @@ class DB:
             WHERE m.type = 'table';
         """)
         return {name:pkey for name,pkey in self.cursor.fetchall() if name!='sqlite_sequence'}
-    def from_csv(self,table,path_csv,pkey='key'):
-        import csv
-        with open(path_csv,'r', newline='') as f:
-            reader = csv.reader(f)
-            header = None
-            mat = []
-            for row in reader:
-                row = [safe_eval(x) for x in row]
-                if header == None:
-                    header = row
-                    continue
-                mat.append(row)
-                if len(mat)==1000:
-                    self.upsert_mat(table,header,mat,pkey)
-                    mat = []
-            if mat:
-                self.upsert_mat(table,header,mat,pkey)
-                mat = []
-        return self.tables[table]
     
     def count(self,table,where=''):
         if not valid_identifier(table):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {table}")
+            print(f"DB_ERROR| Illegal identifier: {table}")
             return 0
         suc, sql_where, values = parse_where(where)
         if not suc:
-            print(f"{num2time()}|DB_ERROR| Illegal where: {sql_where}")
+            print(f"DB_ERROR| Illegal where: {sql_where}")
             return 0
         sql = f"SELECT count(*) from {table} {sql_where};"
         try:
@@ -487,11 +469,11 @@ class DB:
             return 0
     def delete(self,table,where=''):
         if not valid_identifier(table):
-            print(f"{num2time()}|DB_ERROR| Illegal identifier: {table}")
+            print(f"DB_ERROR| Illegal identifier: {table}")
             return False
         suc, sql_where, values = parse_where(where)
         if not suc:
-            print(f"{num2time()}|DB_ERROR| Illegal where: {sql_where}")
+            print(f"DB_ERROR| Illegal where: {sql_where}")
             return False
         sql = f"DELETE FROM {table} {sql_where};"
         try:
@@ -499,7 +481,7 @@ class DB:
             self.conn.commit()
             return True
         except Exception as e:
-            print(f"{num2time()}|DB_ERROR|{e}({sql}){values}")
+            print(f"DB_ERROR|{e}({sql}){values}")
             return False
     
     

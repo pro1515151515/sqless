@@ -2,9 +2,15 @@
 
 An async HTTP server for SQLite, FileStorage and WebPage.
 
-## Description
+It is also an ORM for lazy people, similar to [dataset](https://github.com/pudo/dataset).
 
-sqless is a Python application that provides web service with local database and local file storage.
+## Why sqless is special:
+- **Schema free**. Auto adjusts SQLite schema to fit JSON inputs.
+- **High performance**. Faster than many ORMs, see [performance test](#performance-test).
+- **Minimal setup**. Just `pip install sqless` to run the server.
+- **Multi-file sharding**. Easily store data across multiple SQLite files.
+
+
 
 ## Installation
 
@@ -66,15 +72,16 @@ r = requests.delete(
     headers={"Authorization": f"Bearer {SECRET}"}
 )
 ```
+sqless does not limit you to one database.
 
-- `{BASE_URL}/db/users` will read/write records in `users` table in `db/default.sqlite`.
+You can access **many SQLite databases** by using a separator in the table name `DB_TABLE`.
 
-
-- `{BASE_URL}/db/mall-users` will read/write records in `users` table in `db/mall.sqlite`.
-
-
-- `{BASE_URL}/db/east-mall-users` will read/write records in `users` table in `db/east/mall.sqlite`.
-
+Example:
+```
+/db/users              -> db/default.sqlite (table: users)
+/db/mall-users         -> db/mall.sqlite    (table: users)
+/db/east-mall-users    -> db/east/mall.sqlite (table: users)
+```
 
 ### Using the FileStorage API
 ```python
@@ -136,6 +143,50 @@ r = requests.post(
 )
 print(r.json())
 ```
+
+## Use sqless as an ORM
+
+Example:
+```python
+import sqless
+db = sqless.DB(path_db = "your_database.db")
+
+# create/get the "users" table
+users = db['users']
+# upsert item
+users['U0001'] = {"name": "Tom", 'age':12, 'sex':'M', 'hobby':["football", 'basketball'],'meta':{"height": 1.75, "weight": 70}}
+# get item
+print(users['U0001'])
+
+# query data from the "users" table
+r = db.query("users", 'age > 9')
+if r['suc']:
+    print(r['data']) # result list
+else:
+    print(r['msg']) # error message
+```
+
+## Performance Test
+
+Run the benchmark script:
+
+```bash
+pip install dataset pony sqlalchemy prettytable
+python3 ./benchmark/cmp_with_other_orms.py
+```
+
+Test machine: **AMD EPYC 7K62 (4 cores) @ 2.595GHz, Ubuntu 22.04.5 LTS x86_64**
+
+Result: 
+```
+| name       | init (s)        | write (s)         | read (s)         |
+| ---------- | --------------- | ----------------- | ---------------- |
+| dataset    | 0.006 (↑94.69%) | 2.932 (↑43.84%)   | 21.421 (↑95.89%) |
+| pony.orm   | 0.015 (↑97.85%) | 0.040 (↓4013.15%) | 11.617 (↑92.43%) |
+| sqlalchemy | 0.009 (↑96.45%) | 5.357 (↑69.26%)   | 27.279 (↑96.78%) |
+| sqless     | 0.000 (↑0.00%)  | 1.647 (↑0.00%)    | 0.879 (↑0.00%)   |
+```
+
 
 ## License
 

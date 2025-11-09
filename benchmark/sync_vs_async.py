@@ -64,13 +64,13 @@ async def test_sqless():
     data = json_load(f'{path_this}/test_data.json')
     t0=time.time()
     async for ret in asyncio.as_completed([
-        limited(semaphore,db_set('temp-cats',item))
-        for item in data['Cats']
+        limited(semaphore,db_set('temp-cats',{'key':i,**item}))
+        for i,item in enumerate(data['Cats'])
     ]):
         ...
     t1=time.time()
     async for ret in asyncio.as_completed([
-        limited(semaphore,db_get('temp-cats',f'key = C{i}'))
+        limited(semaphore,db_get('temp-cats',f'key = {i}'))
         for i in range(1000)
     ]):
         ...
