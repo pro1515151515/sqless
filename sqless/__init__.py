@@ -2,13 +2,13 @@
 sqless - An async HTTP server for SQLite, FileStorage and WebPage.
 """
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 __author__ = "pro1515151515"
 __email__ = "pro1515151515@qq.com"
 
 from .database import DB
 from .server import run_server
-
+from .client import RDB
 def hello():
     """A simple function to test the package."""
     return "Hello from sqless!"

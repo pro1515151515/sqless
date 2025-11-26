@@ -135,20 +135,27 @@ async def run_server(
                 ret['max_page'] += 1
         return web.Response(body=orjson.dumps(ret), content_type='application/json')
 
+    def natural_sort_key(s):
+        return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
     async def handle_get_fs(request):
         suc, path_file = check_path(f"fs/{request.match_info['path_file']}", path_base_fs)
-        if suc and os.path.isfile(path_file):
-            if request.query.get('check') is not None:
-                print(f"[{num2time()}]{request['client_ip']}|CHECK {path_file}")
-                return web.Response(body=orjson.dumps({'suc': True}), content_type='application/json')
-            else:
-                print(f"[{num2time()}]{request['client_ip']}|DOWNLOAD {path_file}")
-                return web.FileResponse(path_file)
+        if suc:
+            if os.path.isfile(path_file):
+                if request.query.get('check') is not None:
+                    print(f"[{num2time()}]{request['client_ip']}|CHECK {path_file}")
+                    return web.Response(body=orjson.dumps({'suc': True}), content_type='application/json')
+                else:
+                    print(f"[{num2time()}]{request['client_ip']}|DOWNLOAD {path_file}")
+                    return web.FileResponse(path_file)
+            elif os.path.isdir(path_file):
+                if request.query.get('check') is not None:
+                    print(f"[{num2time()}]{request['client_ip']}|CHECK {path_file}")
+                    return web.Response(body=orjson.dumps({'suc': True, 'data':sorted(os.listdir(path_file),key=natural_sort_key)}), content_type='application/json')
+        if request.query.get('check') is not None:
+            return web.Response(body=orjson.dumps({'suc': False}), content_type='application/json')
         else:
-            if request.query.get('check') is not None:
-                return web.Response(body=orjson.dumps({'suc': False}), content_type='application/json')
-            else:
-                return web.Response(status=404, text='File not found')
+            return web.Response(status=404, text='File not found')
 
     async def handle_post_fs(request):
         suc, path_file = check_path(f"fs/{request.match_info['path_file']}", path_base_fs)
@@ -234,7 +241,7 @@ async def run_server(
     site = web.TCPSite(runner, host, port)
     await site.start()
     print(f"Serving on http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}")
-    print(f"Serving at {path_this}")
+    print(f"Serving at {os.path.abspath(path_this)}")
     if not os.path.exists(f"{path_this}/www"):
         os.makedirs(f"{path_this}/www")
     if not os.path.exists(f"{path_this}/www/openapi.yaml"):
@@ -256,9 +263,9 @@ async def run_server(
         pass
     finally:
         print("Cleaning up...")
-        await runner.cleanup()
+        runner.cleanup()
         for db_key in list(dbs.keys()):
-            await dbs[db_key].close()
+            dbs[db_key].close()
             del dbs[db_key]
 
 def main():

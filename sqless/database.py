@@ -97,89 +97,162 @@ def split(s, sep=',', L="{[(\"'", R="}])\"'"):
         yield temp
 
 def parse_where(where_str):
-    """Parse limited where expressions into (sql, params).
-       This function is intentionally conservative: reject suspicious chars
-       and require simple pattern: col op value [and|or ...]
     """
+    Parse safe WHERE expressions into (sql, params) with AND/OR/NOT, parentheses, and ORDER BY.
+
+    -------------------------------------------------------------------------
+    Syntax Guide for Developers:
+
+    1. Basic condition:
+       col operator value
+       - col: column name (must match [A-Za-z_][A-Za-z0-9_]*)
+       - operator: one of =, ==, !=, <, >, <=, >=, like, ilike, is
+       - value: string (quoted with single ' or double ") or numeric literal
+         - Example: age >= 18
+         - Example: name = "Alice Bob"
+         - Example: role is null
+
+    2. Logical operators:
+       - AND, OR, NOT (case-insensitive)
+       - NOT applies to the condition immediately following it
+       - Examples:
+         - age >= 18 AND role = "Hero"
+         - NOT age < 10
+
+    3. Parentheses:
+       - Use () to group expressions and control precedence
+       - Examples:
+         - (age < 10 AND name like "%e%") OR (role = "Antagonist" AND NOT age >= 16)
+
+    4. ORDER BY clause (optional):
+       - Use at the end of the expression: ORDER BY col1 [ASC|DESC], col2 [ASC|DESC], ...
+       - Column names must be valid identifiers
+       - ASC/DESC is optional; default ordering depends on DB
+       - Example:
+         - ORDER BY id DESC, name ASC
+
+    5. Safety rules:
+       - Forbidden characters: ; -- /* */
+       - Only valid identifiers allowed as column names
+       - String literals must be quoted
+       - Function calls or subqueries are NOT allowed
+
+    6. Return:
+       - (True, sql_string, params_list) on success
+       - (False, error_message, []) on parse error
+
+    -------------------------------------------------------------------------
+    Example usage:
+
+    expr = '(age < 10 AND name like "%e%") OR (role = "Antagonist" AND NOT age >= 16) ORDER BY id DESC, name ASC'
+    ok, sql, params = parse_where(expr)
+    print(ok)     # True
+    print(sql)    # where ( age < ? and name like ? ) or ( role = ? and not age >= ? ) order by id desc, name asc
+    print(params) # ['10', '%e%', 'Antagonist', '16']
+    -------------------------------------------------------------------------
+    """
+    allowed_ops = {'=', '==', '!=', '<', '>', '<=', '>=', 'like', 'ilike', 'is'}
+
+    def valid_identifier(s):
+        return re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', s) is not None
+
     if not where_str:
-        return True,'', []
+        return True, '', []
+
     s = where_str.strip()
-    # reject common SQL injection characters / comments
-    if ';' in s or '--' in s or '/*' in s or '*/' in s:
+
+    # reject dangerous chars
+    if any(x in s for x in (';', '--', '/*', '*/')):
         return False, 'contains forbidden characters', []
-    # basic tokenization by spaces while respecting quotes
-    try:
-        tokens = list(split(s, ' ', "\"'"))
-        # expect pattern: col op value [and|or col op value ...]
-        if len(tokens) < 3 or (len(tokens) - 1) % 4 not in (0,):
-            # attempt fallback: allow "order by" presence handled below
-            pass
-        # detect 'order by' part
-        lower = s.lower()
-        if ' order by ' in lower:
-            where_part, order_part = s.rsplit('order by', 1)
+
+    # separate ORDER BY if present
+    m_order = re.search(r'\border\s+by\b', s, re.IGNORECASE)
+    if m_order:
+        where_part = s[:m_order.start()].strip()
+        order_part = s[m_order.end():].strip()
+    else:
+        where_part = s
+        order_part = ''
+
+    # tokenize where_part
+    token_pattern = r"""
+        (\() |               # open parenthesis
+        (\)) |               # close parenthesis
+        ("[^"]*") |          # double-quoted string
+        ('[^']*') |          # single-quoted string
+        (\bAND\b|\bOR\b|\bNOT\b) |   # logical operators
+        (<=|>=|!=|==|=|<|>|like|ilike|is) | # comparison operators
+        ([^\s()]+)           # identifiers / values
+    """
+    tokens = [t for t in re.findall(token_pattern, where_part, re.IGNORECASE | re.VERBOSE)]
+    tokens = [next(filter(None, t)) for t in tokens]  # flatten
+
+    sql_parts = []
+    params = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+
+        # parentheses
+        if tok in ('(', ')'):
+            sql_parts.append(tok)
+            i += 1
+            continue
+
+        # logical operators
+        if tok.upper() in ('AND', 'OR', 'NOT'):
+            sql_parts.append(tok.lower())
+            i += 1
+            continue
+
+        # expect: col op val
+        if i + 2 >= len(tokens):
+            return False, f"Invalid condition near: {tok}", []
+
+        col, op, val = tokens[i], tokens[i+1].lower(), tokens[i+2]
+
+        if not valid_identifier(col):
+            return False, f"Invalid column name: {col}", []
+
+        if op not in allowed_ops:
+            return False, f"Operator not allowed: {op}", []
+
+        # handle NULL
+        if val.lower() == 'null' and op == 'is':
+            sql_parts.append(f"{col} is null")
         else:
-            where_part, order_part = s, ''
-        # simple parser: split by and/or
-        # we will only allow operators in this set:
-        allowed_ops = {'=', '==', '!=', '<', '>', '<=', '>=', 'like', 'ilike', 'is'}
-        parts = re.split(r'\s+(and|or)\s+', where_part, flags=re.IGNORECASE)
-        sql_parts = []
-        params = []
-        # parts example: [cond1, connector, cond2, ...]
-        i = 0
-        while i < len(parts):
-            cond = parts[i].strip()
-            connector = ''
-            if i + 1 < len(parts):
-                connector = parts[i + 1]
-            # parse cond -> col op val
-            m = re.match(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(=|==|!=|<=|>=|<|>|like|ilike|is)\s*(.+)$', cond, flags=re.I)
-            if not m:
-                return False, f"Invalid condition: {cond}", []
-            col, op, val = m.group(1), m.group(2).lower(), m.group(3).strip()
-            if op not in allowed_ops:
-                return False, f"Operator not allowed: {op}", []
-            if not valid_identifier(col):
-                return False, f"Invalid column name: {col}", []
-            # handle null
-            if val.lower() == 'null' and op == 'is':
-                sql_parts.append(f"{col} is null")
+            # strip quotes
+            if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                val_raw = val[1:-1]
             else:
-                # strip quotes if present
-                if (val.startswith("'") and val.endswith("'")) or (val.startswith('"') and val.endswith('"')):
-                    raw = val[1:-1]
-                else:
-                    raw = val
-                sql_parts.append(f"{col} {op} ?")
-                params.append(raw)
-            if connector:
-                sql_parts.append(connector.lower())
-            i += 2
-        sql = "where " + " ".join(sql_parts)
-        # order by parsing (very minimal)
-        order_clause = ''
-        if order_part:
-            cols = []
-            for part in order_part.split(','):
-                y = part.strip().split()
-                if not y:
-                    continue
-                colname = y[0]
-                if not valid_identifier(colname):
-                    return False, f"Invalid order column: {colname}", []
-                if len(y) == 1:
-                    cols.append(colname)
-                elif len(y) == 2 and y[1].lower() in ('asc', 'desc'):
-                    cols.append(f"{colname} {y[1].lower()}")
-                else:
-                    return False, f"Invalid order clause: {part}", []
-            if cols:
-                order_clause = " order by " + ", ".join(cols)
-                sql += order_clause
-        return True, sql, params
-    except Exception as e:
-        return False, f"parse error: {e}", []
+                val_raw = val
+            sql_parts.append(f"{col} {op} ?")
+            params.append(val_raw)
+
+        i += 3
+
+    sql = "where " + " ".join(sql_parts)
+
+    # handle ORDER BY (simple)
+    if order_part:
+        order_cols = []
+        for part in order_part.split(','):
+            items = part.strip().split()
+            if not items:
+                continue
+            colname = items[0]
+            if not valid_identifier(colname):
+                return False, f"Invalid order column: {colname}", []
+            direction = ''
+            if len(items) == 2 and items[1].lower() in ('asc', 'desc'):
+                direction = f" {items[1].lower()}"
+            elif len(items) > 2:
+                return False, f"Invalid order clause: {part}", []
+            order_cols.append(f"{colname}{direction}")
+        if order_cols:
+            sql += " order by " + ", ".join(order_cols)
+
+    return True, sql, params
 
 
 class Table:

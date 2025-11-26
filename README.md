@@ -9,7 +9,7 @@ It is also an ORM for lazy people, similar to [dataset](https://github.com/pudo/
 - **High performance**. Faster than many ORMs, see [performance test](#performance-test).
 - **Minimal setup**. Just `pip install sqless` to run the server.
 - **Multi-file sharding**. Easily store data across multiple SQLite files.
-- **SQL-safe**. Uses semantic parsing, parameter binding, and identifier validation..
+- **SQL-safe**. Uses semantic parsing, parameter binding, and identifier validation.
 
 
 
@@ -165,6 +165,82 @@ if r['suc']:
     print(r['data']) # result list
 else:
     print(r['msg']) # error message
+```
+
+## Use sqless as remote databases
+```
+# Server: 
+#     sqless --host 0.0.0.0 --secret RANDOM_PASSWORD
+#   optional:
+#       --host 127.0.0.1  Host
+#       --port 12239      Port
+#       --path ./         Home folder
+#       --fsize 200       Max file size (in MB) allowed in POST /fs (fs_set)
+# Client:
+#     ↓ ↓ ↓
+import os
+import sqless
+
+# [1/7] connect to remote sqless server
+rdb = sqless.RDB("http://127.0.0.1:12239","RANDOM_PASSWORD")
+
+# [2/7] fs_set(key,path_or_data,retry=5): upload to remote
+print(rdb.fs_set("demo/image.png","D:/1.png"))    # if path exists, upload file
+print(rdb.fs_set("demo/1.txt","hello world"))     # if path not exist, upload data
+print(rdb.fs_set("demo/10.txt",b'\x01\x02\x03'))  # data can be str, bytes, list, dict
+print(rdb.fs_set("demo/2.txt",["hello", "world"]))
+print(rdb.fs_set("demo/22.txt",{"a":1,"b":2}))
+
+
+# [3/7] fs_get(key,path_or_none,overwrite=False,retry=3): download from remote
+print(rdb.fs_get("demo/image.png","D:/2.png", overwrite=True)) # download and overwrite local file
+print(rdb.fs_get("demo/image.png","D:/2.png")) # skip if local file exists
+print(rdb.fs_get("demo/1.txt"))  # b'hello world'
+print(rdb.fs_get("demo/2.txt"))  # b'["hello","world"]'
+print(rdb.fs_get("demo/10.txt")) # b'\x01\x02\x03'
+print(rdb.fs_get("demo/22.txt")) # b'{"a":1,"b":2}'
+
+# [4/7] fs_check(key):
+#   1. check if a file exists (without downloading).
+print(rdb.fs_check("demo/image.png"))   # {'suc': True}
+print(rdb.fs_check("demo/404.png"))     # {'suc': False}
+#   2. list filenames in natural order.
+print(rdb.fs_check("demo")) # {'suc': True, 'data': ['1.txt', '2.txt', '10.txt', '22.txt', 'image.png']}
+
+
+# [5/7] db_set(db_table, data, retry=5): insert or update data using the 'key' field
+print(rdb.db_set("demo-users", {'key':'U0001', 'name':'Tom', 'age':14, 'species':'Cat', 'role':'Protagonist'}))       # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0002', 'name':'Jerry', 'age':12, 'species':'Mouse', 'role':'Protagonist'}))   # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0003', 'name':'Spike', 'age':8, 'species':'Dog', 'role':'Supporting'}))       # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0004', 'name':'Tyke', 'age':6, 'species':'Dog', 'role':'Supporting'}))        # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0005', 'name':'Butch', 'age':15, 'species':'Cat', 'role':'Antagonist'}))      # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0006', 'name':'Tuffy', 'age':5, 'species':'Mouse', 'role':'Supporting'}))     # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0007', 'name':'Toodles', 'age':13, 'species':'Cat', 'role':'Supporting'}))    # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0008', 'name':'Nibbles', 'age':6, 'species':'Mouse', 'role':'Supporting'}))   # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0009', 'name':'Quacker', 'age':6, 'species':'Duck', 'role':'Supporting'}))    # {'suc': True}
+print(rdb.db_set("demo-users", {'key':'U0010', 'name':'Lightning', 'age':16, 'species':'Cat', 'role':'Antagonist'}))  # {'suc': True}
+
+# [6/7] db_get(db_table,where,page=1,limit=20): query one page of data
+print(rdb.db_get("demo-users", '(age < 10 and name like "%e%") OR (role = "Antagonist" and not age >= 16) order by age desc, name asc'))
+#{
+#    'suc': True,
+#    'data': [
+#        {'key': 'U0005', 'name': 'Butch', 'age': 15, 'species': 'Cat', 'role': 'Antagonist'},
+#        {'key': 'U0003', 'name': 'Spike', 'age': 8, 'species': 'Dog', 'role': 'Supporting'},
+#        {'key': 'U0008', 'name': 'Nibbles', 'age': 6, 'species': 'Mouse', 'role': 'Supporting'},
+#        {'key': 'U0009', 'name': 'Quacker', 'age': 6, 'species': 'Duck', 'role': 'Supporting'},
+#        {'key': 'U0004', 'name': 'Tyke', 'age': 6, 'species': 'Dog', 'role': 'Supporting'}
+#    ],
+#    'count': 5,
+#    'max_page': 1
+#}
+
+# [7/7] db_iter(db_table,where): iterate over all data
+for user in rdb.db_iter("demo-users",'(age < 10 and name like "%e%") OR (role = "Antagonist" and not age >= 16) order by age desc, name asc'):
+    print(user) # {'key': 'U0005', 'name': 'Butch', 'age': 15, 'species': 'Cat', 'role': 'Antagonist'}
+
+for user in rdb.db_iter("demo-users",''): # An empty where='' returns all data
+    print(user) # {'key': 'U0001', 'name': 'Tom', 'age': 14, 'species': 'Cat', 'role': 'Protagonist'}
 ```
 
 ## Performance Test
