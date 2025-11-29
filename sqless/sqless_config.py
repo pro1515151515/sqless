@@ -1,7 +1,7 @@
 import os
 import asyncio
 from aiohttp_mcp import AiohttpMCP
-from sqless import DBS
+import sqless
 
 # --- Paths & Configuration ---
 
@@ -12,9 +12,14 @@ path_base_www :str = os.path.realpath(f"{path_this}/www")
 
 max_filesize :int = 200  # Max file size (in MB) allowed in POST /fs
 
+open_get_prefix :list = [
+    '/fs/data',   # allow GET /fs/data/xxx to fetch f"{path_this_fs}/data/xxx" without secret
+    '/api/hello' # allow GET /api/hello without secret
+] 
+
 # --- Database & MCP Server Initialization ---
 
-dbs = DBS(path_base_db)
+dbs = sqless.DBS(path_base_db)
 mcp = AiohttpMCP("My App", log_level="WARNING")
 
 # --- MCP Tools / API Functions ---

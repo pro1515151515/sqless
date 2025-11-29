@@ -2,7 +2,7 @@
 sqless - An async HTTP server for SQLite, FileStorage and WebPage.
 """
 
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 __author__ = "pro1515151515"
 __email__ = "pro1515151515@qq.com"
 

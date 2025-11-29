@@ -89,6 +89,17 @@ async def run_server(
             txt = f.read()
         with open(path_cfg,'w',encoding='utf-8') as f:
             f.write(txt)
+            f.write(f"""
+# --- start sqless server ---
+if __name__=='__main__':
+    asyncio.run(sqless.run_server(
+        host='{host}',
+        port={port},
+        secret='{secret}',
+        path_this = path_this,
+        path_cfg = '{os.path.split(path_cfg)[1]}',
+    ))
+""")
     cfg_name = os.path.splitext(os.path.split(path_cfg)[1])[0]
     import importlib, sys
     sys.path.append(path_this)
@@ -97,11 +108,12 @@ async def run_server(
     path_base_fs = cfg.path_base_fs if hasattr(cfg,'path_base_fs') else os.path.realpath(f"{path_this}/fs")
     path_base_www= cfg.path_base_www if hasattr(cfg,'path_base_www') else os.path.realpath(f"{path_this}/www")
     max_filesize = cfg.max_filesize if hasattr(cfg,'max_filesize') else 200 # MB
+    open_get_prefix = tuple(cfg.open_get_prefix) if hasattr(cfg,'open_get_prefix') else tuple([])
     dbs = cfg.dbs if hasattr(cfg,'dbs') else DBS(path_base_db)
     print(f"path_base_db: {path_base_db}")
     print(f"path_base_fs: {path_base_fs}")
     print(f"path_base_www: {path_base_www}")
-    
+    print(f"open_get_prefix: {open_get_prefix}")
 
     allowed_auth_header = [
         f'Bearer {secret}',
@@ -118,6 +130,8 @@ async def run_server(
                 return await handler(request)
             auth_header = request.headers.get('Authorization')
             if auth_header in allowed_auth_header:
+                return await handler(request)
+            if request.method == 'GET' and request.path.startswith(open_get_prefix):
                 return await handler(request)
             return web.Response(status=401,text='Unauthorized',headers={'WWW-Authenticate': 'Basic realm="sqless API"'})
         return middleware_handler
@@ -182,7 +196,7 @@ async def run_server(
         return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
     async def handle_get_fs(request):
-        suc, path_file = check_path(f"fs/{request.match_info['path_file']}", path_base_fs)
+        suc, path_file = check_path(f"{request.match_info['path_file']}", path_base_fs)
         if suc:
             if os.path.isfile(path_file):
                 if request.query.get('check') is not None:
@@ -201,7 +215,7 @@ async def run_server(
             return web.Response(status=404, text='File not found')
 
     async def handle_post_fs(request):
-        suc, path_file = check_path(f"fs/{request.match_info['path_file']}", path_base_fs)
+        suc, path_file = check_path(f"{request.match_info['path_file']}", path_base_fs)
         print(f"[{num2time()}]{request['client_ip']}|UPLOAD attempt {suc} {path_file}")
         if not suc:
             return web.Response(body=orjson.dumps({'suc': False, 'data': 'Unsafe path'}), content_type='application/json')
