@@ -1,6 +1,6 @@
 # sqless
 
-An async HTTP server for SQLite, FileStorage and WebPage.
+An async HTTP server for SQLite, FileStorage, WebPage, WebAPI and [Model Context Protocol (MCP)](https://modelcontextprotocol.io/docs/getting-started/intro) .
 
 It is also an ORM for lazy people, similar to [dataset](https://github.com/pudo/dataset).
 
@@ -175,7 +175,7 @@ else:
 #       --host 127.0.0.1  Host
 #       --port 12239      Port
 #       --path ./         Home folder
-#       --fsize 200       Max file size (in MB) allowed in POST /fs (fs_set)
+#
 # Client:
 #     ↓ ↓ ↓
 import os
@@ -242,6 +242,46 @@ for user in rdb.db_iter("demo-users",'(age < 10 and name like "%e%") OR (role = 
 for user in rdb.db_iter("demo-users",''): # An empty where='' returns all data
     print(user) # {'key': 'U0001', 'name': 'Tom', 'age': 14, 'species': 'Cat', 'role': 'Protagonist'}
 ```
+
+## Use sqless as API and MCP Server
+
+After running `sqless --secret RANDOM_PASSWORD`, it will create a `sqless_config.py` at the current directory.
+
+You can modify the demo functions, wrap with `@mcp.tool()`, restart `sqless`, then use your functions in both MCP and API modes.
+
+The MCP functions are automatically registered as API endpoints, providing dual functionality.
+
+When running long tasks, if client connection closes, the task will be automatically canceled.
+
+```python
+@mcp.tool()
+def add(a: int, b: int) -> int:
+    """A simple add tool"""
+    return a + b
+```
+
+- MCP usage:
+    - URL: http://127.0.0.1:12239/mcp
+    - Header: `Authorization`: `Bearer <secret>`
+- API usage:
+    - GET example:
+        ```
+        curl -H "Authorization: Bearer <secret>" \
+            "http://127.0.0.1:12239/api/add?a=1&b=2"
+        ```
+    - POST example:
+        ```
+        curl -X POST \
+             -H "Authorization: Bearer <secret>" \
+             -H "Content-Type: application/json" \
+             -d '{"f":"add","a":1,"b":2}' \
+             http://127.0.0.1:12239/api
+        ```
+- Browser (address bar) usage:
+    - `http://127.0.0.1:12239/api/add 1 2`
+    - username: (empty)
+    - password: `<secret>`
+
 
 ## Performance Test
 

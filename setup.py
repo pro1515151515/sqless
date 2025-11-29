@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="sqless",
-    version="0.1.7",
+    version="0.1.8",
     author="pro1515151515",
     author_email="pro1515151515@qq.com",
     description="An async HTTP server for SQLite, FileStorage and WebPage.",
@@ -16,8 +16,7 @@ setup(
     include_package_data=True,
     package_data={
         "sqless": [
-            "openapi.yaml",
-            "docs.html"
+            "sqless_config.py"
         ],
     },
     classifiers=[

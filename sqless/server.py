@@ -1,28 +1,9 @@
 import os
-import time
-import base64
-import asyncio
-from aiohttp import web, ClientSession, FormData, ClientTimeout
-import orjson
-import aiofiles
 from .database import DB
-import re
-path_src = os.path.dirname(os.path.abspath(__file__))
+
 # ---------- Configuration (use env vars in production) ----------
 DEFAULT_SECRET = os.environ.get("SQLESS_SECRET", None)
 
-num2time = lambda t=None, f="%Y%m%d-%H%M%S": time.strftime(f, time.localtime(int(t if t else time.time())))
-tspToday = lambda: int(time.time() // 86400 * 86400 - 8 * 3600)  # UTC+8 today midnight
-
-identifier_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_\-]*[A-Za-z0-9]$")
-
-def valid_identifier(name: str) -> bool:
-    return bool(name and identifier_re.fullmatch(name))
-
-def sanitize_table_name(name: str):
-    if not valid_identifier(name):
-        raise ValueError(f"Invalid identifier: {name}")
-    return name
 
 def check_path(path_file, path_base):
     normalized_path = os.path.realpath(path_file)
@@ -33,47 +14,112 @@ def check_path(path_file, path_base):
         pass
     return False, f"unsafe path: {normalized_path}"
 
+def split(s, sep=',', L="{[(\"'", R="}])\"'"):
+    stack = []
+    temp = ''
+    esc = False
+    for c in s:
+        if c == '\\':
+            esc = True
+            temp += c
+            continue
+        if not esc and c in R and stack:
+            if c == R[L.index(stack[-1])]:
+                stack.pop()
+        elif not esc and c in L:
+            stack.append(c)
+        elif c == sep and not stack:
+            if temp:
+                yield temp
+            temp = ''
+            continue
+        temp += c
+        esc = False
+    if temp:
+        yield temp
 
+
+class DBS:
+    def __init__(self,folder):
+        self.folder = folder
+        self.dbs = {}
+    def __getitem__(self, db_key):
+        db_key = db_key.replace('/', '-')
+        if db_key not in self.dbs:
+            suc, path_db = check_path(f"{self.folder}/{db_key}.sqlite", self.folder)
+            if not suc:
+                return False, path_db
+            db = DB(path_db)
+            self.dbs[db_key] = db
+        return self.dbs[db_key]
+    def close(self):
+        for db_key in list(self.dbs.keys()):
+            self.dbs[db_key].close()
+            del self.dbs[db_key]
+        
 
 async def run_server(
     host='0.0.0.0',
     port=27018,
     secret=DEFAULT_SECRET,
     path_this = os.getcwd(),
-    max_filesize = 200, # MB
+    path_cfg = 'sqless_config.py',
 ):
-    path_base_db = os.path.realpath(f"{path_this}/db")
-    path_base_fs = os.path.realpath(f"{path_this}/fs")
+    import re
+    import base64
+    import asyncio
+    from aiohttp import web, ClientSession, FormData, ClientTimeout
+    import orjson
+    import aiofiles
+    import ast
+    import time
+    path_src = os.path.dirname(os.path.abspath(__file__))
+    num2time = lambda t=None, f="%Y%m%d-%H%M%S": time.strftime(f, time.localtime(int(t if t else time.time())))
+    tspToday = lambda: int(time.time() // 86400 * 86400 - 8 * 3600)  # UTC+8 today midnight
+
+    identifier_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_\-]*[A-Za-z0-9]$")
     if not secret:
         print("[ERROR] Please set SQLESS_SECRET environment variable or pass --secret <secret>")
         return
     
-    dbs = {}
-    async def get_db(db_key='default'):
-        if db_key not in dbs:
-            suc, path_db = check_path(f"{path_this}/db/{db_key}.sqlite", path_base_db)
-            if not suc:
-                return False, path_db
-            db = DB(path_db)
-            dbs[db_key] = db
-        return dbs[db_key]
+    path_cfg = os.path.abspath(path_cfg)
+    if not os.path.exists(path_cfg):
+        os.makedirs(os.path.dirname(path_cfg),exist_ok=True)
+        with open(f"{path_src}/sqless_config.py",'r',encoding='utf-8') as f:
+            txt = f.read()
+        with open(path_cfg,'w',encoding='utf-8') as f:
+            f.write(txt)
+    cfg_name = os.path.splitext(os.path.split(path_cfg)[1])[0]
+    import importlib, sys
+    sys.path.append(path_this)
+    cfg = importlib.import_module(cfg_name)
+    path_base_db = cfg.path_base_db if hasattr(cfg,'path_base_db') else os.path.realpath(f"{path_this}/db")
+    path_base_fs = cfg.path_base_fs if hasattr(cfg,'path_base_fs') else os.path.realpath(f"{path_this}/fs")
+    path_base_www= cfg.path_base_www if hasattr(cfg,'path_base_www') else os.path.realpath(f"{path_this}/www")
+    max_filesize = cfg.max_filesize if hasattr(cfg,'max_filesize') else 200 # MB
+    dbs = cfg.dbs if hasattr(cfg,'dbs') else DBS(path_base_db)
+    print(f"path_base_db: {path_base_db}")
+    print(f"path_base_fs: {path_base_fs}")
+    print(f"path_base_www: {path_base_www}")
+    
 
+    allowed_auth_header = [
+        f'Bearer {secret}',
+        f'Basic {base64.b64encode((':'+secret).encode('utf-8')).decode('utf-8')}',
+    ]
     async def auth_middleware(app, handler):
         async def middleware_handler(request):
             try:
-                request['client_ip'] = request.headers.get('X-Real-IP',request.transport.get_extra_info('peername')[0])
-            except:
+                request['client_ip'] = request.headers.get('X-Real-IP', request.transport.get_extra_info('peername')[0])
+            except (TypeError, IndexError):
                 request['client_ip'] = 'unknown'
             route = request.match_info.route
             if route and getattr(route, "handler", None) == handle_static:
                 return await handler(request)
-            auth = request.headers.get('Authorization', '')
-            if not auth.startswith("Bearer "):
-                return web.Response(status=401, text='Unauthorized')
-            token = auth.split(" ", 1)[1].strip()
-            if token != secret:
-                return web.Response(status=401, text='Unauthorized')
-            return await handler(request)
+            auth_header = request.headers.get('Authorization')
+            if auth_header in allowed_auth_header:
+                return await handler(request)
+            return web.Response(status=401,text='Unauthorized',headers={'WWW-Authenticate': 'Basic realm="sqless API"'})
         return middleware_handler
 
     async def handle_post_db(request):
@@ -85,11 +131,10 @@ async def run_server(
             data = dict(post)
         db_key, table = os.path.split(db_table.replace('-', '/'))
         db_key = db_key or 'default'
-        try:
-            table = sanitize_table_name(table)
-        except ValueError:
+        if not identifier_re.fullmatch(table):
             return web.Response(body=orjson.dumps({'suc': False, 'data': 'invalid table name'}), content_type='application/json')
-        db = await get_db(db_key)
+        #db = await get_db(db_key)
+        db = dbs[db_key]
         if isinstance(db, tuple) and db[0] is False:
             return web.Response(body=orjson.dumps({'suc': False, 'data': db[1]}), content_type='application/json')
         print(f"[{num2time()}]{request['client_ip']}|POST {db_key}|{table}|{data}")
@@ -102,11 +147,10 @@ async def run_server(
         db_table = request.match_info['db_table']
         db_key, table = os.path.split(db_table.replace('-', '/'))
         db_key = db_key or 'default'
-        try:
-            table = sanitize_table_name(table)
-        except ValueError:
+        if not identifier_re.fullmatch(table):
             return web.Response(body=orjson.dumps({'suc': False, 'data': 'invalid table name'}), content_type='application/json')
-        db = await get_db(db_key)
+        #db = await get_db(db_key)
+        db = dbs[db_key]
         where = request.match_info['where']
         print(f"[{num2time()}]{request['client_ip']}|DELETE {db_key}|{table}|{where}")
         ret = db.delete(table, where)
@@ -116,11 +160,10 @@ async def run_server(
         db_table = request.match_info['db_table']
         db_key, table = os.path.split(db_table.replace('-', '/'))
         db_key = db_key or 'default'
-        try:
-            table = sanitize_table_name(table)
-        except ValueError:
+        if not identifier_re.fullmatch(table):
             return web.Response(body=orjson.dumps({'suc': False, 'data': 'invalid table name'}), content_type='application/json')
-        db = await get_db(db_key)
+        #db = await get_db(db_key)
+        db = dbs[db_key]
         where = request.match_info['where']
         page = max(int(request.query.get('page', 1)), 1)
         limit = min(max(int(request.query.get('per_page', 20)), 0), 100)
@@ -188,7 +231,7 @@ async def run_server(
 
     async def handle_static(request):
         file = request.match_info.get('file') or 'index.html'
-        return web.FileResponse(f"{path_this}/www/{file}")
+        return web.FileResponse(f"{path_base_www}/{file}")
 
     async def handle_xmlhttpRequest(request):
         try:
@@ -226,6 +269,70 @@ async def run_server(
                     }), content_type='application/json')
         except Exception as e:
             return web.Response(body=orjson.dumps({"suc": False, "text": str(e)}), content_type='application/json')
+    tools = {}
+    async def call_once(tool,args,kwargs):
+        try:
+            if tool.is_async:
+                ret = await tool.fn(*args,**kwargs)
+            else:
+                ret = tool.fn(*args,**kwargs)
+        except Exception as e:
+            ret = {'suc':False,'data':f"Tool exception: {e}"}
+        return ret
+    async def handle_get_api(request):
+        func_args = request.match_info.get('func_args')
+        cmd = list(split(func_args,' '))
+        f = cmd[0]
+        if f not in tools:
+            return web.Response(body=orjson.dumps({"suc": False, "data": "Tool not found"}), content_type='application/json')
+        tool = tools[f]
+        args = []
+        kwargs = {}
+        for x in cmd[1:]:
+            try:x = ast.literal_eval(x)
+            except: pass
+            args.append(x)
+        for k,v in request.query.items():
+            try:v = ast.literal_eval(v)
+            except: pass
+            kwargs[k] = v
+        info_params = ','.join([str(x) for x in args]+[f"{k}={v}" for k,v in kwargs.items()])
+        print(f"[{num2time()}]{request['client_ip']}|CALL {'async ' if tool.is_async else ''}{f}({info_params})")
+        task = asyncio.create_task(call_once(tool, args, kwargs))
+        while not task.done():
+            await asyncio.sleep(0.1)
+            if request.transport is None or request.transport.is_closing():
+                print(f"[{num2time()}]{request['client_ip']}|CANCEL {'async ' if tool.is_async else ''}{f}({info_params})")
+                task.cancel()
+                return
+        ret = await task
+        return web.Response(body=orjson.dumps(ret), content_type='application/json')
+    
+    async def handle_post_api(request):
+        if request.content_type == 'application/json':
+            kwargs = await request.json()
+        else:
+            post = await request.post()
+            kwargs = dict(post)
+        print(kwargs)
+        if 'f' not in kwargs:
+            return web.Response(body=orjson.dumps({"suc": False, "data": "Miss 'f' input"}), content_type='application/json')
+        f = kwargs.pop('f')
+        if f not in tools:
+            return web.Response(body=orjson.dumps({"suc": False, "data": "Tool not found"}), content_type='application/json')
+        tool = tools[f]
+        info_params = ','.join([f"{k}={v}" for k,v in kwargs.items()])
+        print(f"[{num2time()}]{request['client_ip']}|CALL {'async ' if tool.is_async else ''}{f}({info_params})")
+        task = asyncio.create_task(call_once(tool, [], kwargs))
+        while not task.done():
+            await asyncio.sleep(0.1)
+            if request.transport is None or request.transport.is_closing():
+                print(f"[{num2time()}]{request['client_ip']}|CANCEL {'async ' if tool.is_async else ''}{f}({info_params})")
+                task.cancel()
+                return
+        ret = await task
+        return web.Response(body=orjson.dumps(ret), content_type='application/json')
+
 
     app = web.Application(middlewares=[auth_middleware], client_max_size=max_filesize * 1024 ** 2)
     app.router.add_post('/db/{db_table}', handle_post_db)
@@ -234,26 +341,22 @@ async def run_server(
     app.router.add_get('/fs/{path_file:.*}', handle_get_fs)
     app.router.add_post('/fs/{path_file:.*}', handle_post_fs)
     app.router.add_post('/xmlhttpRequest', handle_xmlhttpRequest)
+    app.router.add_get('/api/{func_args:.*}',handle_get_api)
+    app.router.add_post('/api',handle_post_api)
+    if hasattr(cfg, 'mcp'):
+        from aiohttp_mcp import setup_mcp_subapp
+        tools = cfg.mcp._fastmcp._tool_manager._tools
+        print(f"MCP: {len(tools)} tools loaded.")
+        print([k for k in tools.keys()])
+        setup_mcp_subapp(app, cfg.mcp, prefix="/mcp")
     app.router.add_get('/{file:.*}', handle_static)
-
+    
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
     print(f"Serving on http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}")
     print(f"Serving at {os.path.abspath(path_this)}")
-    if not os.path.exists(f"{path_this}/www"):
-        os.makedirs(f"{path_this}/www")
-    if not os.path.exists(f"{path_this}/www/openapi.yaml"):
-        with open(f"{path_src}/openapi.yaml",'r',encoding='utf-8') as f:
-            txt = f.read()
-        with open(f"{path_this}/www/openapi.yaml",'w',encoding='utf-8') as f:
-            f.write(txt.replace('127.0.0.1:12239',f"{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"))
-    if not os.path.exists(f"{path_this}/www/index.html"):
-        with open(f"{path_src}/docs.html",'r',encoding='utf-8') as f:
-            txt = f.read()
-        with open(f"{path_this}/www/index.html",'w',encoding='utf-8') as f:
-            f.write(txt)
     stop_event = asyncio.Event()
     try:
         # simplified loop, exit on Cancelled/Error
@@ -263,10 +366,7 @@ async def run_server(
         pass
     finally:
         print("Cleaning up...")
-        runner.cleanup()
-        for db_key in list(dbs.keys()):
-            dbs[db_key].close()
-            del dbs[db_key]
+        await runner.cleanup()
 
 def main():
     import argparse
@@ -277,7 +377,7 @@ def main():
     parser.add_argument('--port', type=int, default=12239, help='Port to bind to (default: 12239)')
     parser.add_argument('--secret', default=DEFAULT_SECRET, help='Secret for authentication')
     parser.add_argument('--path', default=os.getcwd(), help=f'Base path for database and file storage (default: {os.getcwd()})')
-    parser.add_argument('--fsize', type=int, default=200, help='Max file size (in MB) allowed in POST /fs')
+    parser.add_argument('--cfg', type=str, default='sqless_config.py', help='Path to configuration file')
     args = parser.parse_args()
     
     asyncio.run(run_server(
@@ -285,7 +385,7 @@ def main():
         port=args.port,
         secret=args.secret,
         path_this=args.path,
-        max_filesize=args.fsize
+        path_cfg = args.cfg
     ))
 
 if __name__ == "__main__":

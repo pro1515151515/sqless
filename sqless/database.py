@@ -72,29 +72,7 @@ def valid_identifier(name: str) -> bool:
     return bool(name and identifier_re.fullmatch(name))
 
 
-def split(s, sep=',', L="{[(\"'", R="}])\"'"):
-    stack = []
-    temp = ''
-    esc = False
-    for c in s:
-        if c == '\\':
-            esc = True
-            temp += c
-            continue
-        if not esc and c in R and stack:
-            if c == R[L.index(stack[-1])]:
-                stack.pop()
-        elif not esc and c in L:
-            stack.append(c)
-        elif c == sep and not stack:
-            if temp:
-                yield temp
-            temp = ''
-            continue
-        temp += c
-        esc = False
-    if temp:
-        yield temp
+
 
 def parse_where(where_str):
     """
