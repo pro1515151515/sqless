@@ -73,6 +73,7 @@ async def run_server(
     import aiofiles
     import ast
     import time
+    import traceback
     path_src = os.path.dirname(os.path.abspath(__file__))
     num2time = lambda t=None, f="%Y%m%d-%H%M%S": time.strftime(f, time.localtime(int(t if t else time.time())))
     tspToday = lambda: int(time.time() // 86400 * 86400 - 8 * 3600)  # UTC+8 today midnight
@@ -117,7 +118,7 @@ if __name__=='__main__':
 
     allowed_auth_header = [
         f'Bearer {secret}',
-        f'Basic {base64.b64encode((':'+secret).encode('utf-8')).decode('utf-8')}',
+        f"Basic {base64.b64encode((':'+secret).encode('utf-8')).decode('utf-8')}",
     ]
     async def auth_middleware(app, handler):
         async def middleware_handler(request):
@@ -196,7 +197,7 @@ if __name__=='__main__':
         return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
     async def handle_get_fs(request):
-        suc, path_file = check_path(f"{request.match_info['path_file']}", path_base_fs)
+        suc, path_file = check_path(f"{path_base_fs}/{request.match_info['path_file']}", path_base_fs)
         if suc:
             if os.path.isfile(path_file):
                 if request.query.get('check') is not None:
@@ -215,34 +216,36 @@ if __name__=='__main__':
             return web.Response(status=404, text='File not found')
 
     async def handle_post_fs(request):
-        suc, path_file = check_path(f"{request.match_info['path_file']}", path_base_fs)
-        print(f"[{num2time()}]{request['client_ip']}|UPLOAD attempt {suc} {path_file}")
-        if not suc:
-            return web.Response(body=orjson.dumps({'suc': False, 'data': 'Unsafe path'}), content_type='application/json')
-        folder = os.path.dirname(path_file)
-        if not os.path.exists(folder):
-            os.makedirs(folder, exist_ok=True)
-        reader = await request.multipart()
-        field = await reader.next()
-        if not field:
-            return web.Response(body=orjson.dumps({'suc': False, 'data': 'No file uploaded'}), content_type='application/json')
-        # write file safely
         try:
-            async with aiofiles.open(path_file, 'wb') as f:
-                while True:
-                    chunk = await field.read_chunk()
-                    if not chunk:
-                        break
-                    await f.write(chunk)
-            # ensure uploaded file isn't executable
+            suc, path_file = check_path(f"{path_base_fs}/{request.match_info['path_file']}", path_base_fs)
+            print(f"[{num2time()}]{request['client_ip']}|UPLOAD attempt {suc} {path_file}")
+            if not suc:
+                return web.Response(body=orjson.dumps({'suc': False, 'data': 'Unsafe path'}), content_type='application/json')
+            folder = os.path.dirname(path_file)
+            if not os.path.exists(folder):
+                os.makedirs(folder, exist_ok=True)
+            reader = await request.multipart()
+            field = await reader.next()
+            if not field:
+                return web.Response(body=orjson.dumps({'suc': False, 'data': 'No file uploaded'}), content_type='application/json')
+            # write file safely
             try:
-                os.chmod(path_file, 0o644)
-            except Exception:
-                pass
-            return web.Response(body=orjson.dumps({'suc': True, 'data': 'File Saved'}), content_type='application/json')
+                async with aiofiles.open(path_file, 'wb') as f:
+                    while True:
+                        chunk = await field.read_chunk()
+                        if not chunk:
+                            break
+                        await f.write(chunk)
+                # ensure uploaded file isn't executable
+                try:
+                    os.chmod(path_file, 0o644)
+                except Exception:
+                    pass
+                return web.Response(body=orjson.dumps({'suc': True, 'data': 'File Saved'}), content_type='application/json')
+            except Exception as e:
+                return web.Response(body=orjson.dumps({'suc': False, 'data': str(e)}), content_type='application/json')
         except Exception as e:
-            return web.Response(body=orjson.dumps({'suc': False, 'data': str(e)}), content_type='application/json')
-
+            print(f"fs/post error: {e}\n{traceback.format_exc()}")
     async def handle_static(request):
         file = request.match_info.get('file') or 'index.html'
         return web.FileResponse(f"{path_base_www}/{file}")

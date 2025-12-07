@@ -31,6 +31,7 @@ setup(
         "aiohttp>=3.8.0",
         "orjson>=3.6.0",
         "aiofiles>=0.8.0",
+        "aiohttp-mcp>=0.6.1"
     ],
     entry_points={
         "console_scripts": [

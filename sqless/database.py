@@ -521,19 +521,19 @@ class DB:
     def delete(self,table,where=''):
         if not valid_identifier(table):
             print(f"DB_ERROR| Illegal identifier: {table}")
-            return False
+            return {'suc':False,'msg':f"DB_ERROR|Illegal identifier: {table}"}
         suc, sql_where, values = parse_where(where)
         if not suc:
             print(f"DB_ERROR| Illegal where: {sql_where}")
-            return False
+            return {'suc':False,'msg':f"DB_ERROR|Illegal where: {sql_where}"}
         sql = f"DELETE FROM {table} {sql_where};"
         try:
             self.cursor.execute(sql,values)
             self.conn.commit()
-            return True
+            return {'suc':True}
         except Exception as e:
             print(f"DB_ERROR|{e}({sql}){values}")
-            return False
+            return {'suc':False,'msg':f"DB_ERROR|{e}({sql}){values}"}
     
     
 
