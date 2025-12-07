@@ -11,7 +11,7 @@ class RDB:
     Remote key-value FS + simple table API.
     """
 
-    def __init__(self, host: str, secret: str, timeout: float = 10.0):
+    def __init__(self, host: str, secret: str, timeout = (10, 600)):
         self.host = host.rstrip("/")
         self.secret = secret
         self.timeout = timeout
